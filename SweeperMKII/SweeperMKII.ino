@@ -29,7 +29,6 @@ float Ki = 0.0015;
 float Kd = 1.55;
 int NavigationMode = 0;//0-StraightLines, 1-WallFollow, 2-OutwardSpiral, 3-InwardSpiral
 int BackOutMode = 0;//0-Offline, 1-Left, 2-Right
-bool TurnAround = false;//if true forces a double 90-turn on BackOut
 int TurnaroundDir = 0;//0-Left, 1-Right, add 1 to obtain BackOutMode
 int PrecisionFactor = 1;
 float MotionDistTotal = 0;
@@ -220,7 +219,6 @@ void StabilizeSpeed()
     rMotor.SetPWM(rPWM);
     
     
-    Serial.println(CourseDirError.x);
 
   
     
@@ -402,6 +400,154 @@ void HoldCourse()
     }
 }
 
+void TurnAround()
+{
+  Serial.print(MotionDistTotal);
+  Serial.print(" ");
+  Serial.print(lSpeed);
+  Serial.print(" ");
+  Serial.println(rSpeed);
+  
+  
+  if (TurnAroundCS == 0)
+  {
+    courseHoldMode = 1;
+    lTargetSpeed = 75;
+    rTargetSpeed = 75;
+    Backward();
+    MotionDistTotal = 0;
+    TurnAroundCS++;
+  }
+
+
+  if (TurnAroundCS == 1)
+  {    
+    if(MotionDistTotal >= 100)
+    {
+      Brake();
+      BackOutDelayStartT = systick_uptime();
+      courseHoldMode = 0;
+      TurnAroundCS++;
+    }
+    else if(MotionDistTotal > 75)
+    {
+      lTargetSpeed = 25;
+      rTargetSpeed = 25;
+    }
+    else if (MotionDistTotal > 50)
+    {
+      lTargetSpeed = 50;
+      rTargetSpeed = 50;
+    }
+  }
+
+  if (TurnAroundCS == 2 && systick_uptime() - BackOutDelayStartT > 50)
+  {
+    MotionDistTotal = 0;
+    courseHoldMode = 1;
+    if(BackOutMode == 1)Left();
+    if(BackOutMode == 2)Right();
+    TurnAroundCS++;
+  }
+
+  if (TurnAroundCS == 3)
+  {
+    if(MotionDistTotal >= 196)
+    {
+      Brake();
+      BackOutDelayStartT = systick_uptime();
+      courseHoldMode = 0;
+      TurnAroundCS++;
+    }
+    else if(MotionDistTotal > 150)
+    {
+      lTargetSpeed = 25;
+      rTargetSpeed = 25;
+    }
+    else if (MotionDistTotal > 100)
+    {
+      lTargetSpeed = 50;
+      rTargetSpeed = 50;
+    }
+  }
+
+  if (TurnAroundCS == 4 && systick_uptime() - BackOutDelayStartT > 50)
+  {
+    MotionDistTotal = 0;
+    courseHoldMode = 1;
+    Forward();
+    TurnAroundCS++;
+  }
+
+  if (TurnAroundCS == 5)
+  {
+    if(MotionDistTotal >= 200)
+    {
+      Brake();
+      BackOutDelayStartT = systick_uptime();
+      courseHoldMode = 0;
+      TurnAroundCS++;
+    }
+    else if(MotionDistTotal > 150)
+    {
+      lTargetSpeed = 25;
+      rTargetSpeed = 25;
+    }
+    else if (MotionDistTotal > 100)
+    {
+      lTargetSpeed = 50;
+      rTargetSpeed = 50;
+    }
+  }
+
+  if (TurnAroundCS == 6 && systick_uptime() - BackOutDelayStartT > 50)
+  {
+    MotionDistTotal = 0;
+    courseHoldMode = 1;
+    if(BackOutMode == 1)Left();
+    if(BackOutMode == 2)Right();
+    TurnAroundCS++;
+  }
+
+  if (TurnAroundCS == 7)
+  {
+    if(MotionDistTotal >= 196)
+    {
+      Brake();
+      BackOutDelayStartT = systick_uptime();
+      courseHoldMode = 0;
+      TurnAroundCS++;
+    }
+    else if(MotionDistTotal > 150)
+    {
+      lTargetSpeed = 25;
+      rTargetSpeed = 25;
+    }
+    else if (MotionDistTotal > 100)
+    {
+      lTargetSpeed = 50;
+      rTargetSpeed = 50;
+    }
+  }
+
+  if (TurnAroundCS == 8 && systick_uptime() - BackOutDelayStartT > 50)
+  {
+    MotionDistTotal = 0;
+    courseHoldMode = 1;
+    if (NavigationMode == 0)
+    {
+      lTargetSpeed = TargetSpeed;
+      rTargetSpeed = TargetSpeed;
+    }
+    Forward();
+    TurnAroundCS = 0;
+    BackOutMode = 0;
+  }
+
+  
+}
+
+
 
 #pragma endregion
 
@@ -449,7 +595,6 @@ void loop()
       if (digitalRead(BUMPER_L) || digitalRead(BUMPER_R))
       {
         BackOutMode = TurnaroundDir + 1;
-        TurnAround = true;
       }
 
 
@@ -458,7 +603,7 @@ void loop()
     }
     else
     {
-      BackOut();
+      TurnAround();
     }
 
     
@@ -479,10 +624,10 @@ void loop()
   }
 
   if (irrecv.decode(&irresults)) {
-    //Serial.println(irresults.value);
+    Serial.println(irresults.value);
     //dump(&results); not needed, not defined
 
-    if (irresults.value == 1124692103 || irresults.value == 89149445 || irresults.value == 3737721253)//play button
+    if (irresults.value == 1124692103 || irresults.value == 89149445 || irresults.value == 3737721253 || irresults.value == 3011669255)//play button
     {
       cleaning = !cleaning;
       if (cleaning)
