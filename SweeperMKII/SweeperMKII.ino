@@ -38,7 +38,6 @@ float CourseDistError = 0;
 float CourseIntegral = 0;
 float CourseDerivative =0;
 uint8 courseHoldMode = 1;//0 - off, 1 - straight, 2 - idle rotational
-int8 lDir = 0, rDir = 0;
 
 #pragma endregion
 
@@ -92,41 +91,31 @@ void setup()
 void Forward()
 {
   lMotor.Forward();
-  lDir = 1;
   rMotor.Forward();
-  rDir = 1;
 }
 
 void Backward()
 {
   lMotor.Backward();
-  lDir = -1;
   rMotor.Backward();
-  rDir = -1;
 }
 
 void Left()
 {
   lMotor.Backward();
-  lDir = -1;
   rMotor.Forward();
-  rDir = 1;
 }
 
 void Right()
 {
   lMotor.Forward();
-  lDir = 1;
   rMotor.Backward();
-  rDir = -1;
 }
 
 void Brake()
 {
   lMotor.Brake();
-  lDir = 0;
   rMotor.Brake();
-  rDir = 0;
 }
 
 
@@ -164,22 +153,21 @@ int rAvg[16];
 int lTargetSpeed = TargetSpeed;
 int rTargetSpeed = TargetSpeed;
 
-void StabilizeSpeed()
+void MeasureSpeed()
 {
   SdeltaT = systick_uptime() - STimerStart;
   if (SdeltaT >= 80)
   {
     //1. Measure speed
-    lSpeed = lTachCount * 2587.5 / 800;// s/t = 2070/0.080 = 2587.5
-    lDist += lTachCount * 2070 / 8000;
+    lSpeed = lTachCount * 2587.5 / 800;// s/t = 207/0.080 = 2587.5
+    lDist += lTachCount * 207 / 800;// 207mm per rotation, 800 pulses per rotation
     //Serial.print(lDist);
     lTachCount = 0;
     rSpeed = rTachCount * 2587.5 / 800;
-    rDist += rTachCount * 2070 / 8000;
+    rDist += rTachCount * 207 / 800;
     //Serial.print(" ");
     //Serial.println(rDist);
     rTachCount = 0;
-    HoldCourse();
 
     //2. Smooth it out
     for (int i = 0; i < 15; i++)
@@ -198,35 +186,39 @@ void StabilizeSpeed()
     }
     float lAvg = lSum / 16;
     float rAvg = rSum / 16;
-
-    //3. Run PID
-    float lError = lTargetSpeed - lAvg;
-    lIntegral = lIntegral + (lErrorPrior + lError * 40);
-    float lDerivative = (lError - lErrorPrior) / 80;
-    lPWM = (Kp * lError) + (Ki * lIntegral) + (Kd * lDerivative);
-    lErrorPrior = lError;
-    if (lPWM < 0) lPWM = 0;
-    if (lPWM > 255) lPWM = 255;
-    lMotor.SetPWM(lPWM);
-
-    float rError = rTargetSpeed - rAvg;
-    rIntegral = rIntegral + (rErrorPrior + rError * 40);
-    float rDerivative = (rError - rErrorPrior) / 80;
-    rPWM = (Kp * rError) + (Ki * rIntegral) + (Kd * rDerivative);
-    rErrorPrior = rError;
-    if (rPWM < 0) rPWM = 0;
-    if (rPWM > 255) rPWM = 255;
-    rMotor.SetPWM(rPWM);
     
     
-
-  
     
-
+    
     STimerStart = systick_uptime();
     SdeltaT = 0;
   }
 }
+
+void StabilizeSpeed()
+{
+  HoldCourse();
+
+  float lError = lTargetSpeed - lAvg;
+  lIntegral = lIntegral + (lErrorPrior + lError * 40);
+  float lDerivative = (lError - lErrorPrior) / 80;
+  lPWM = (Kp * lError) + (Ki * lIntegral) + (Kd * lDerivative);
+  lErrorPrior = lError;
+  if (lPWM < 0) lPWM = 0;
+  if (lPWM > 255) lPWM = 255;
+  lMotor.SetPWM(lPWM);
+
+  float rError = rTargetSpeed - rAvg;
+  rIntegral = rIntegral + (rErrorPrior + rError * 40);
+  float rDerivative = (rError - rErrorPrior) / 80;
+  rPWM = (Kp * rError) + (Ki * rIntegral) + (Kd * rDerivative);
+  rErrorPrior = rError;
+  if (rPWM < 0) rPWM = 0;
+  if (rPWM > 255) rPWM = 255;
+  rMotor.SetPWM(rPWM);
+}
+
+
 
 
 
@@ -251,9 +243,40 @@ uint32 CleanStartT = 0;
 uint32 BackOutDelayStartT = 0;
 uint8 BackOutCS = 0;
 uint8 TurnAroundCS = 0;
+uint8 MoveCS = 0;
+int lMove = 0;
+int rMove = 0;
+int lTargetPulses = 0;
+int rTargetPulses = 0;
+float MoveRatio = 1;
 
 uint8 WallFollowCS = 0;
 uint32 WallFollowDelayStartT = 0;
+
+
+void Move()
+{
+  switch (MoveCS)
+  case 0:
+    lTargetPulses = lMove * 800 / 207;
+    rTargetPulses = rMove * 800 / 207;
+
+    if (lTargetPulses > 0) lMotor.Forward();
+    else if (lTargetPulses < 0) {lMotor.Backward(); lTargetPulses *= -1;}
+    else lMotor.Brake();
+
+    if (rTargetPulses > 0) rMotor.Forward();
+    else if (rTargetPulses < 0) {rMotor.Backward(); rTargetPulses *= -1;}
+    else rMotor.Brake();
+
+    MoveRatio = rTargetPulses / lTargetPulses;
+
+    MoveCS++;
+  break;
+  case 1:
+
+  
+}
 
 
 
