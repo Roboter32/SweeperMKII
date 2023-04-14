@@ -21,12 +21,12 @@ IRrecv irrecv(PB6);
 //Navigation
 decode_results irresults;
 bool cleaning = false;
-int TargetSpeed = 200;//speed in mm/s
+int TargetSpeed = 100;//speed in mm/s
 int PathWidth = 200;//cleaning path width in mm
 int WheelBaseWidth = 250;
-float Kp = 0.15;
-float Ki = 0.0015;
-float Kd = 1.55;
+float Kp = 1;
+float Ki = 0.01;
+float Kd = 0;
 int NavigationMode = 0;//0-StraightLines, 1-WallFollow, 2-OutwardSpiral, 3-InwardSpiral
 int BackOutMode = 0;//0-Offline, 1-Left, 2-Right
 int TurnaroundDir = 0;//0-Left, 1-Right, add 1 to obtain BackOutMode
@@ -133,6 +133,8 @@ uint32 STimerStart = 0;
 float SdeltaT = 0;
 int lTachCount = 0;
 int rTachCount = 0;
+int lTachCountTotal = 0;
+int rTachCountTotal = 0;
 float lSpeed;
 float rSpeed;//measured speed in mm/s +- 0.5mm/s at 400mm/s
 
@@ -148,44 +150,48 @@ float rIntegral = 0;
 int lErrorPrior = 0;
 int rErrorPrior = 0;
 
-int lAvg[16];
-int rAvg[16];
+int lAvgT[16];
+int rAvgT[16];
+float lAvg = 0;
+float rAvg = 0;
 int lTargetSpeed = TargetSpeed;
 int rTargetSpeed = TargetSpeed;
 
 void MeasureSpeed()
 {
   SdeltaT = systick_uptime() - STimerStart;
-  if (SdeltaT >= 80)
+  if (SdeltaT >= 20) //50Hz
   {
     //1. Measure speed
-    lSpeed = lTachCount * 2587.5 / 800;// s/t = 207/0.080 = 2587.5
+    lSpeed = lTachCount * 10350 / 800;// s/t = 207/0.020 = 10350
     lDist += lTachCount * 207 / 800;// 207mm per rotation, 800 pulses per rotation
     //Serial.print(lDist);
+    lTachCountTotal += lTachCount;
     lTachCount = 0;
-    rSpeed = rTachCount * 2587.5 / 800;
+    rSpeed = rTachCount * 10350 / 800;
     rDist += rTachCount * 207 / 800;
     //Serial.print(" ");
     //Serial.println(rDist);
+    rTachCountTotal += rTachCount;
     rTachCount = 0;
 
     //2. Smooth it out
     for (int i = 0; i < 15; i++)
     {
-      lAvg[i] = lAvg[i + 1];
-      rAvg[i] = rAvg[i + 1];
+      lAvgT[i] = lAvgT[i + 1];
+      rAvgT[i] = rAvgT[i + 1];
     }
-    lAvg[15] = lSpeed;
-    rAvg[15] = rSpeed;
+    lAvgT[15] = lSpeed;
+    rAvgT[15] = rSpeed;
     int lSum = 0;
     int rSum = 0;
     for (int i = 0; i < 16; i++)
     {
-      lSum += lAvg[i];
-      rSum += rAvg[i];
+      lSum += lAvgT[i];
+      rSum += rAvgT[i];
     }
-    float lAvg = lSum / 16;
-    float rAvg = rSum / 16;
+    lAvg = lSum / 16;
+    rAvg = rSum / 16;
     
     
     
@@ -197,11 +203,11 @@ void MeasureSpeed()
 
 void StabilizeSpeed()
 {
-  HoldCourse();
+  //HoldCourse();
 
   float lError = lTargetSpeed - lAvg;
-  lIntegral = lIntegral + (lErrorPrior + lError * 40);
-  float lDerivative = (lError - lErrorPrior) / 80;
+  lIntegral = lIntegral + (lErrorPrior + lError);
+  float lDerivative = (lError - lErrorPrior);
   lPWM = (Kp * lError) + (Ki * lIntegral) + (Kd * lDerivative);
   lErrorPrior = lError;
   if (lPWM < 0) lPWM = 0;
@@ -209,8 +215,8 @@ void StabilizeSpeed()
   lMotor.SetPWM(lPWM);
 
   float rError = rTargetSpeed - rAvg;
-  rIntegral = rIntegral + (rErrorPrior + rError * 40);
-  float rDerivative = (rError - rErrorPrior) / 80;
+  rIntegral = rIntegral + (rErrorPrior + rError);
+  float rDerivative = (rError - rErrorPrior);
   rPWM = (Kp * rError) + (Ki * rIntegral) + (Kd * rDerivative);
   rErrorPrior = rError;
   if (rPWM < 0) rPWM = 0;
@@ -244,11 +250,13 @@ uint32 BackOutDelayStartT = 0;
 uint8 BackOutCS = 0;
 uint8 TurnAroundCS = 0;
 uint8 MoveCS = 0;
-int lMove = 0;
-int rMove = 0;
+int lMove = 500;
+int rMove = 500;
 int lTargetPulses = 0;
 int rTargetPulses = 0;
 float MoveRatio = 1;
+float lMoveMult = 1;
+float rMoveMult = 1;
 
 uint8 WallFollowCS = 0;
 uint32 WallFollowDelayStartT = 0;
@@ -256,10 +264,30 @@ uint32 WallFollowDelayStartT = 0;
 
 void Move()
 {
+  if (MoveCS > 0 && (lTachCountTotal >= lTargetPulses || rTachCountTotal >= rTargetPulses))MoveCS = 4;
+  
   switch (MoveCS)
-  case 0:
+  {
+  case 0: //Initialization
+    
+    Serial.println("Starting move...");
+    
+    lTachCountTotal = 0;
+    rTachCountTotal = 0;
+    
     lTargetPulses = lMove * 800 / 207;
     rTargetPulses = rMove * 800 / 207;
+
+    Serial.print("Distances: Left: ");
+    Serial.print(lMove);
+    Serial.print("mm / ");
+    Serial.print(lTargetPulses);
+    Serial.print(" pulses, Right: ");
+    Serial.print(rMove);
+    Serial.print("mm / ");
+    Serial.print(rTargetPulses);
+    Serial.println(" pulses.");
+    Serial.println();
 
     if (lTargetPulses > 0) lMotor.Forward();
     else if (lTargetPulses < 0) {lMotor.Backward(); lTargetPulses *= -1;}
@@ -270,11 +298,83 @@ void Move()
     else rMotor.Brake();
 
     MoveRatio = rTargetPulses / lTargetPulses;
+    MoveRatio -= 1;
+    lMoveMult = MoveRatio / -2 + 1;
+    rMoveMult = MoveRatio / 2 + 1;
+
+    lTargetSpeed = TargetSpeed * lMoveMult;
+    rTargetSpeed = TargetSpeed * rMoveMult;
+
+    lMotor.SetPWM(75);
+    rMotor.SetPWM(75);
+
+    Serial.println("Kickstarting...");
 
     MoveCS++;
   break;
-  case 1:
+  
+  case 1: //Motor kick
 
+    MeasureSpeed();
+    if(lSpeed > 0.8 * lTargetSpeed || rSpeed > 0.8 * rTargetSpeed)MoveCS++;
+
+    Serial.print("Distance: Left: ");
+    Serial.print(lTachCountTotal);
+    Serial.print("/");
+    Serial.print(lTargetPulses);
+    Serial.print(", Right: ");
+    Serial.print(rTachCountTotal);
+    Serial.print("/");
+    Serial.print(rTargetPulses);
+    Serial.print("  Speed: Left: ");
+    Serial.print(lSpeed);
+    Serial.print("/");
+    Serial.print(lTargetSpeed);
+    Serial.print(", Right: ");
+    Serial.print(rSpeed);
+    Serial.print("/");
+    Serial.println(rTargetSpeed);
+
+    
+    
+
+  break;
+
+  case 2:
+
+    MeasureSpeed();
+    StabilizeSpeed();
+
+    Serial.print("Distance: Left: ");
+    Serial.print(lTachCountTotal);
+    Serial.print("/");
+    Serial.print(lTargetPulses);
+    Serial.print(", Right: ");
+    Serial.print(rTachCountTotal);
+    Serial.print("/");
+    Serial.print(rTargetPulses);
+    Serial.print("  Speed: Left: ");
+    Serial.print(lSpeed);
+    Serial.print("/");
+    Serial.print(lTargetSpeed);
+    Serial.print(", Right: ");
+    Serial.print(rSpeed);
+    Serial.print("/");
+    Serial.println(rTargetSpeed);
+
+  break;
+
+  case 4:
+
+    Brake();
+
+    lMove *= -1;
+    rMove *= -1;//test code
+
+    MoveCS++;
+
+  break;
+  }
   
 }
 
@@ -613,7 +713,7 @@ void loop()
     //SMART NAVIGATION
 
 
-    if (BackOutMode == 0)
+    /*if (BackOutMode == 0)
     {
       if (digitalRead(BUMPER_L) || digitalRead(BUMPER_R))
       {
@@ -627,13 +727,19 @@ void loop()
     else
     {
       TurnAround();
-    }
+    }*/
+
+    if (MoveCS == 5)MoveCS = 0;
+    Move();
+
+
+
+
 
     
     
     
-    
-    StabilizeSpeed();
+    //StabilizeSpeed();
 
   }
   
